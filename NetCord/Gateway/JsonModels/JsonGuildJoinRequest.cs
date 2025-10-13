@@ -31,7 +31,7 @@ public class JsonGuildJoinRequest : JsonEntity
     public IReadOnlyList<JsonGuildJoinRequestFormResponse> FormResponses { get; set; }
 
     [JsonPropertyName("actioned_by_user")]
-    public JsonUser ActionedByUser { get; set; }
+    public JsonUser? ActionedByUser { get; set; }
 
     [JsonPropertyName("actioned_at")]
     public ulong ActionedAt { get; set; }

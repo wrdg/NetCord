@@ -17,7 +17,7 @@ public partial class JsonGuildJoinRequestFormResponse
     public bool Required { get; set; }
 
     [JsonPropertyName("response")]
-    public bool Response { get; set; }
+    public object Response { get; set; }
 
     [JsonPropertyName("values")]
     public IReadOnlyList<string> Values { get; set; }

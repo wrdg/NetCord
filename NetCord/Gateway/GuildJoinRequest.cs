@@ -13,8 +13,8 @@ public class GuildJoinRequest(JsonModels.JsonGuildJoinRequest jsonModel, RestCli
     public DateTimeOffset? LastSeenAt => jsonModel.LastSeenAt;
     public string? RejectionReason => jsonModel.RejectionReason;
     public ulong UserId => jsonModel.UserId;
-    public User User { get; } = new(jsonModel.User, client);
-    public IReadOnlyList<GuildJoinRequestFormResponse> FormResponses { get; } = jsonModel.FormResponses.Select(e => new GuildJoinRequestFormResponse(e)).ToArray();
-    public User ActionedByUser { get; } = new(jsonModel.ActionedByUser, client);
+    public User? User { get; } = new(jsonModel.User, client);
+    public IReadOnlyList<GuildJoinRequestFormResponse> FormResponses { get; } = jsonModel.FormResponses.Select(e => GuildJoinRequestFormResponse.Create(e)).ToArray();
+    public User? ActionedByUser { get; } = jsonModel.ActionedByUser is not null ? new (jsonModel.ActionedByUser, client) : null;
     public ulong ActionedAt => jsonModel.ActionedAt;
 }
