@@ -10,7 +10,7 @@ public class GuildJoinRequest(JsonModels.JsonGuildJoinRequest jsonModel, RestCli
     public GuildJoinRequestStatus ApplicationStatus => jsonModel.ApplicationStatus;
     //public DateTimeOffset CreatedAt => jsonModel.CreatedAt;
     public ulong GuildId => jsonModel.GuildId;
-    public DateTimeOffset LastSeenAt => jsonModel.LastSeenAt;
+    public DateTimeOffset? LastSeenAt => jsonModel.LastSeenAt;
     public string? RejectionReason => jsonModel.RejectionReason;
     public ulong UserId => jsonModel.UserId;
     public User User { get; } = new(jsonModel.User, client);
