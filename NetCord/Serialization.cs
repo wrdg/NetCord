@@ -241,6 +241,8 @@ namespace NetCord;
 [JsonSerializable(typeof(GuildUsersSearchTimestamp))]
 [JsonSerializable(typeof(JsonGuildUsersSearchResult))]
 [JsonSerializable(typeof(GuildUsersSearchPaginationProperties))]
+[JsonSerializable(typeof(JsonGuildJoinRequestUpdateEventArgs))]
+[JsonSerializable(typeof(JsonGuildJoinRequestDeleteEventArgs))]
 [JsonSerializable(typeof(JsonMessagePollAnswerVotersResult))]
 [JsonSerializable(typeof(JsonMessagePollVoteEventArgs))]
 [JsonSerializable(typeof(JsonSubscription))]
