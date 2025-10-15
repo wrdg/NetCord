@@ -1,4 +1,6 @@
-﻿namespace NetCord.Gateway;
+﻿using System.Text.Json;
+
+namespace NetCord.Gateway;
 
 public abstract class GuildJoinRequestFormResponse(JsonModels.JsonGuildJoinRequestFormResponse jsonModel) : IJsonModel<JsonModels.JsonGuildJoinRequestFormResponse>
 {
@@ -17,7 +19,7 @@ public abstract class GuildJoinRequestFormResponse(JsonModels.JsonGuildJoinReque
             GuildJoinRequestFormResponseFieldType.Terms => new GuildJoinRequestFormTermsResponse(jsonModel),
             GuildJoinRequestFormResponseFieldType.TextInput or GuildJoinRequestFormResponseFieldType.Paragraph => new GuildJoinRequestFormTextResponse(jsonModel),
             GuildJoinRequestFormResponseFieldType.MultipleChoice => new GuildJoinRequestFormMultipleChoiceResponse(jsonModel),
-            _ => new GuildJoinRequestFormUnknownResponse(jsonModel)
+            _ => throw new NotImplementedException($"Field type {jsonModel.FieldType} is not implemented."),
         };
     }
 }
@@ -25,23 +27,43 @@ public abstract class GuildJoinRequestFormResponse(JsonModels.JsonGuildJoinReque
 public sealed class GuildJoinRequestFormTermsResponse(JsonModels.JsonGuildJoinRequestFormResponse jsonModel)
     : GuildJoinRequestFormResponse(jsonModel)
 {
-    public bool Response => (bool)jsonModel.Response;
+    public bool Response
+    {
+        get
+        {
+            if (jsonModel.Response is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.True)
+                return true;
+            if (jsonModel.Response is JsonElement jsonElementFalse && jsonElementFalse.ValueKind == JsonValueKind.False)
+                return false;
+            throw new InvalidOperationException("Response is not a boolean.");
+        }
+    }
 }
 
 public sealed class GuildJoinRequestFormTextResponse(JsonModels.JsonGuildJoinRequestFormResponse jsonModel)
     : GuildJoinRequestFormResponse(jsonModel)
 {
-    public string Response => (string)jsonModel.Response;
+    public string Response
+    {
+        get
+        {
+            if (jsonModel.Response is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.String)
+                return jsonElement.GetString()!;
+            throw new InvalidOperationException("Response is not a string.");
+        }
+    }
 }
 
 public sealed class GuildJoinRequestFormMultipleChoiceResponse(JsonModels.JsonGuildJoinRequestFormResponse jsonModel)
     : GuildJoinRequestFormResponse(jsonModel)
 {
-    public int Response => (int)jsonModel.Response;
-}
-
-public sealed class GuildJoinRequestFormUnknownResponse(JsonModels.JsonGuildJoinRequestFormResponse jsonModel)
-    : GuildJoinRequestFormResponse(jsonModel)
-{
-    public object Response => jsonModel.Response;
+    public int Response
+    {
+        get
+        {
+            if (jsonModel.Response is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.Number)
+                return jsonElement.GetInt32();
+            throw new InvalidOperationException("Response is not a number.");
+        }
+    }
 }
