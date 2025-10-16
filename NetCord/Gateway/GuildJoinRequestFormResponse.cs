@@ -31,11 +31,17 @@ public sealed class GuildJoinRequestFormTermsResponse(JsonModels.JsonGuildJoinRe
     {
         get
         {
-            if (jsonModel.Response is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.True)
-                return true;
-            if (jsonModel.Response is JsonElement jsonElementFalse && jsonElementFalse.ValueKind == JsonValueKind.False)
-                return false;
-            throw new InvalidOperationException("Response is not a boolean.");
+            if (jsonModel.Response is JsonElement jsonElement)
+            {
+                return jsonElement.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => throw new InvalidOperationException("Response is not a boolean.")
+                };
+            }
+
+            throw new Exception();
         }
     }
 }
