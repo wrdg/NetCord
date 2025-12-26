@@ -94,6 +94,7 @@ public sealed partial class VoiceClient : WebSocketClient
     private readonly IUdpConnectionProvider _udpConnectionProvider;
     private readonly IVoiceEncryptionProvider _encryptionProvider;
     private readonly IVoiceReceiveHandler _receiveHandler;
+    private readonly TimeSpan _externalSocketAddressDiscoveryTimeout;
 
     internal UdpState? _udpState;
 
@@ -110,6 +111,7 @@ public sealed partial class VoiceClient : WebSocketClient
         _udpConnectionProvider = configuration.UdpConnectionProvider ?? UdpConnectionProvider.Instance;
         _encryptionProvider = configuration.EncryptionProvider ?? VoiceEncryptionProvider.Instance;
         _receiveHandler = configuration.ReceiveHandler ?? NullVoiceReceiveHandler.Instance;
+        _externalSocketAddressDiscoveryTimeout = configuration.ExternalSocketAddressDiscoveryTimeout.GetValueOrDefault(new(5 * TimeSpan.TicksPerSecond));
     }
 
     private protected override ValueTask SendIdentifyAsync(ConnectionState connectionState, CancellationToken cancellationToken = default)
@@ -252,9 +254,9 @@ public sealed partial class VoiceClient : WebSocketClient
                         (ip, port) = await GetExternalSocketAddressAsync(udpConnection, ssrc, buffer).ConfigureAwait(false);
                         if (ip is null)
                         {
-                            Log<object?>(LogLevel.Warning, null, null, static (s, e) => "Failed to get external socket address after 5 attempts. Restarting the client.");
+                            Log<object?>(LogLevel.Error, null, null, static (s, e) => "Failed to get the external socket address. Aborting the client.");
 
-                            await AbortAndRestartAsync(state, connectionState).ConfigureAwait(false);
+                            Abort();
                             return;
                         }
 
@@ -294,7 +296,7 @@ public sealed partial class VoiceClient : WebSocketClient
                 {
                     var json = payload.Data.GetValueOrDefault().ToObject(Serialization.Default.JsonSpeaking);
 
-                    await InvokeEventAsync(_speaking, () => new SpeakingEventArgs(json), () => Cache = Cache.CacheUser(json.UserId, json.Ssrc)).ConfigureAwait(false);
+                    await InvokeEventAsync(_speaking, this, json, static json => new SpeakingEventArgs(json), static (client, json) => client.Cache = client.Cache.CacheUser(json.UserId, json.Ssrc)).ConfigureAwait(false);
                 }
                 break;
             case VoiceOpcode.HeartbeatACK:
@@ -336,7 +338,7 @@ public sealed partial class VoiceClient : WebSocketClient
                     Log<object?>(LogLevel.Debug, null, null, static (s, e) => "Client connect received.");
 
                     var json = payload.Data.GetValueOrDefault().ToObject(Serialization.Default.JsonClientConnect);
-                    await InvokeEventAsync(_userConnect, () => new UserConnectEventArgs(json.UserIds)).ConfigureAwait(false);
+                    await InvokeEventAsync(_userConnect, json, static json => new UserConnectEventArgs(json.UserIds)).ConfigureAwait(false);
                 }
                 break;
             case VoiceOpcode.ClientDisconnect:
@@ -344,7 +346,7 @@ public sealed partial class VoiceClient : WebSocketClient
                     Log<object?>(LogLevel.Debug, null, null, static (s, e) => "Client disconnect received.");
 
                     var json = payload.Data.GetValueOrDefault().ToObject(Serialization.Default.JsonClientDisconnect);
-                    await InvokeEventAsync(_userDisconnect, () => new UserDisconnectEventArgs(json.UserId), () => Cache = Cache.RemoveUser(json.UserId)).ConfigureAwait(false);
+                    await InvokeEventAsync(_userDisconnect, this, json, static json => new UserDisconnectEventArgs(json.UserId), static (client, json) => client.Cache = client.Cache.RemoveUser(json.UserId)).ConfigureAwait(false);
                 }
                 break;
         }
@@ -373,44 +375,53 @@ public sealed partial class VoiceClient : WebSocketClient
 
         var discoveryDatagram = CreateDiscoveryDatagram(array, ssrc);
 
-        for (int attempts = 0; attempts < 5; attempts++)
+        using CancellationTokenSource cancellationTokenSource = new(_externalSocketAddressDiscoveryTimeout);
+
+        var cancellationToken = cancellationTokenSource.Token;
+
+        int length;
+        try
         {
-            using CancellationTokenSource cancellationTokenSource = new(500);
+            await udpConnection.SendAsync(discoveryDatagram, cancellationToken).ConfigureAwait(false);
 
-            var cancellationToken = cancellationTokenSource.Token;
-
-            int length;
-            try
+            while (true)
             {
-                await udpConnection.SendAsync(discoveryDatagram, cancellationToken).ConfigureAwait(false);
-
                 length = await udpConnection.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
+
+                if (length is 74 && BinaryPrimitives.ReadUInt16BigEndian(buffer) is 2)
+                    break;
             }
-            catch (OperationCanceledException)
+        }
+        catch (OperationCanceledException)
+        {
+            Log<object?>(LogLevel.Error, null, null, static (s, e) =>
             {
-                Log<object?>(LogLevel.Warning, null, null, static (s, e) => "Failed to get external socket address due to timeout. Retrying.");
-                continue;
-            }
-
-            var datagram = buffer.AsSpan(0, length);
-
-            ArrayPool<byte>.Shared.Return(array);
-
-            return GetSocketAddress(datagram);
+                return "Failed to get the external socket address due to timeout.";
+            });
+            return default;
+        }
+        catch (Exception ex)
+        {
+            Log<object?>(LogLevel.Error, null, ex, static (s, e) =>
+            {
+                return $"An error occurred while getting the external socket address.{Environment.NewLine}{e}";
+            });
+            return default;
         }
 
         ArrayPool<byte>.Shared.Return(array);
 
-        return default;
+        return GetSocketAddress(buffer.AsSpan(0, length));
     }
 
     private static ReadOnlyMemory<byte> CreateDiscoveryDatagram(byte[] buffer, uint ssrc)
     {
         Memory<byte> bytes = new(buffer, 0, 74);
         var span = bytes.Span;
-        span[1] = 1;
-        span[3] = 70;
+        BinaryPrimitives.WriteUInt16BigEndian(span, 1);
+        BinaryPrimitives.WriteUInt16BigEndian(span[2..], 70);
         BinaryPrimitives.WriteUInt32BigEndian(span[4..], ssrc);
+        span[8..].Clear();
         return bytes;
     }
 
@@ -451,7 +462,7 @@ public sealed partial class VoiceClient : WebSocketClient
 #pragma warning disable CA2012 // Use ValueTasks correctly
             for (ushort i = 0; i < framesMissed; i++)
             {
-                tasks[i] = InvokeEventAsync(handlers, () =>
+                tasks[i] = InvokeEventAsync(handlers, ssrc, static ssrc =>
                 {
                     return new VoiceReceiveEventArgs(null, 0, 0, ssrc);
                 }, nameof(_voiceReceive));
@@ -464,9 +475,11 @@ public sealed partial class VoiceClient : WebSocketClient
 
             ValueTask InvokeEventForReceivedFrameAsync()
             {
-                return InvokeEventWithDisposalAsync(handlers, () =>
+                return InvokeEventWithDisposalAsync(handlers, (Encryption: encryption, PacketStorage: packetStorage, Ssrc: ssrc), static data =>
                 {
-                    var packet = packetStorage.Packet;
+                    var packet = data.PacketStorage.Packet;
+                    var encryption = data.Encryption;
+
                     var plaintextLength = packet.PayloadLength - encryption.Expansion;
                     var array = ArrayPool<byte>.Shared.Rent(plaintextLength);
                     var plaintext = array.AsSpan(0, plaintextLength);
@@ -478,7 +491,7 @@ public sealed partial class VoiceClient : WebSocketClient
                             : BinaryPrimitives.ReadUInt16BigEndian(packet.Datagram[(packet.HeaderLength + 2)..]))
                         : 0;
 
-                    return new VoiceReceiveEventArgs(array, extensionLength, plaintextLength - extensionLength, ssrc);
+                    return new VoiceReceiveEventArgs(array, extensionLength, plaintextLength - extensionLength, data.Ssrc);
                 }, args =>
                 {
                     ArrayPool<byte>.Shared.Return(args._buffer!);
